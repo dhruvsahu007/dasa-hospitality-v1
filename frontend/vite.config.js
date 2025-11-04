@@ -14,6 +14,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         agent: resolve(__dirname, 'agent.html'),
+        admin: resolve(__dirname, 'admin.html'),
       },
     },
   },

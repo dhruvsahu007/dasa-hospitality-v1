@@ -12,7 +12,12 @@ from database import (
     save_chat_message,
     update_time_spent,
     get_all_customers,
-    get_customer_stats
+    get_customer_stats,
+    update_customer_status,
+    update_customer_notes,
+    get_customer_notes,
+    get_priority_queue,
+    delete_customer
 )
 
 # Initialize database on startup
@@ -214,7 +219,9 @@ async def get_customers():
                 "device_type": customer[5],
                 "time_spent_seconds": customer[6],
                 "created_at": customer[7],
-                "last_active": customer[8]
+                "last_active": customer[8],
+                "status": customer[9] if len(customer) > 9 else "new",
+                "admin_notes": customer[10] if len(customer) > 10 else ""
             })
         
         return {
@@ -236,6 +243,78 @@ async def get_stats():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve stats: {str(e)}")
+
+@app.put("/api/customers/{customer_id}/status")
+async def update_status(customer_id: int, status: str):
+    """Update customer status"""
+    try:
+        valid_statuses = ['new', 'contacted', 'in_progress', 'closed']
+        if status not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+        
+        update_customer_status(customer_id, status)
+        return {
+            "success": True,
+            "message": f"Customer status updated to {status}"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update status: {str(e)}")
+
+@app.put("/api/customers/{customer_id}/notes")
+async def update_notes(customer_id: int, notes: str):
+    """Update customer admin notes"""
+    try:
+        update_customer_notes(customer_id, notes)
+        return {
+            "success": True,
+            "message": "Notes saved successfully"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update notes: {str(e)}")
+
+@app.get("/api/customers/{customer_id}/notes")
+async def get_notes(customer_id: int):
+    """Get customer admin notes"""
+    try:
+        notes = get_customer_notes(customer_id)
+        return {
+            "success": True,
+            "notes": notes
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve notes: {str(e)}")
+
+@app.get("/api/customers/priority-queue")
+async def get_priority_leads():
+    """Get leads sorted by priority score"""
+    try:
+        priority_leads = get_priority_queue()
+        return {
+            "success": True,
+            "count": len(priority_leads),
+            "leads": priority_leads
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve priority queue: {str(e)}")
+
+@app.delete("/api/customers/{customer_id}")
+async def delete_lead(customer_id: int):
+    """Delete a customer/lead and all associated data"""
+    try:
+        success = delete_customer(customer_id)
+        if success:
+            return {
+                "success": True,
+                "message": f"Customer {customer_id} deleted successfully"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete customer")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete customer: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8001)

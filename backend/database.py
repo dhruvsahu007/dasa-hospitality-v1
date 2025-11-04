@@ -21,6 +21,8 @@ def init_database():
             browser TEXT,
             operating_system TEXT,
             time_spent_seconds INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'new',
+            admin_notes TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -55,7 +57,7 @@ def init_database():
     
     conn.commit()
     conn.close()
-    print(f"✅ Database initialized at: {DB_PATH}")
+    print(f"Database initialized at: {DB_PATH}")
 
 def save_customer_info(name, contact, source, ip_address, device_info, time_spent=0):
     """Save customer information to database"""
@@ -167,7 +169,7 @@ def get_all_customers():
     
     cursor.execute('''
         SELECT id, name, contact, source, ip_address, device_type, 
-               time_spent_seconds, created_at, last_active
+               time_spent_seconds, created_at, last_active, status, admin_notes
         FROM customers
         ORDER BY created_at DESC
     ''')
@@ -176,6 +178,81 @@ def get_all_customers():
     conn.close()
     
     return customers
+
+def calculate_priority_score(time_spent_seconds, source):
+    """
+    Calculate priority score for a lead
+    - Base score from time spent (1 point per minute)
+    - Bonus points for referral sources (+50 points)
+    - Bonus for certain high-value sources
+    """
+    # Base score: 1 point per minute spent on site
+    base_score = time_spent_seconds / 60
+    
+    # Referral bonus points
+    referral_bonus = 0
+    source_lower = source.lower()
+    
+    if 'referral' in source_lower:
+        referral_bonus = 50  # High priority for referrals
+    elif 'advertisement' in source_lower:
+        referral_bonus = 30  # Medium priority for ads
+    elif 'social media' in source_lower:
+        referral_bonus = 20  # Some priority for social
+    elif 'google search' in source_lower:
+        referral_bonus = 10  # Small bonus for organic search
+    
+    # Total priority score
+    priority_score = base_score + referral_bonus
+    
+    return round(priority_score, 2)
+
+def get_priority_queue():
+    """Get customers sorted by priority score (high to low)"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT id, name, contact, source, ip_address, device_type, 
+               time_spent_seconds, created_at, last_active, status, admin_notes
+        FROM customers
+        WHERE status != 'closed'
+        ORDER BY created_at DESC
+    ''')
+    
+    customers = cursor.fetchall()
+    conn.close()
+    
+    # Calculate priority scores and sort
+    priority_list = []
+    for customer in customers:
+        customer_dict = {
+            'id': customer[0],
+            'name': customer[1],
+            'contact': customer[2],
+            'source': customer[3],
+            'ip_address': customer[4],
+            'device_type': customer[5],
+            'time_spent_seconds': customer[6],
+            'created_at': customer[7],
+            'last_active': customer[8],
+            'status': customer[9] if len(customer) > 9 else 'new',
+            'admin_notes': customer[10] if len(customer) > 10 else ''
+        }
+        
+        # Calculate priority score
+        priority_score = calculate_priority_score(
+            customer_dict['time_spent_seconds'],
+            customer_dict['source']
+        )
+        customer_dict['priority_score'] = priority_score
+        
+        priority_list.append(customer_dict)
+    
+    # Sort by priority score (highest first)
+    priority_list.sort(key=lambda x: x['priority_score'], reverse=True)
+    
+    return priority_list
 
 def get_customer_stats():
     """Get statistics about customers"""
@@ -200,8 +277,75 @@ def get_customer_stats():
     cursor.execute('SELECT device_type, COUNT(*) FROM customers GROUP BY device_type')
     stats['device_breakdown'] = dict(cursor.fetchall())
     
+    # Status breakdown
+    cursor.execute('SELECT status, COUNT(*) FROM customers GROUP BY status')
+    stats['status_breakdown'] = dict(cursor.fetchall())
+    
     conn.close()
     return stats
+
+def update_customer_status(customer_id, status):
+    """Update customer status (new, contacted, in_progress, closed)"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        UPDATE customers 
+        SET status = ?, last_active = CURRENT_TIMESTAMP
+        WHERE id = ?
+    ''', (status, customer_id))
+    
+    conn.commit()
+    conn.close()
+
+def update_customer_notes(customer_id, notes):
+    """Update admin notes for a customer"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        UPDATE customers 
+        SET admin_notes = ?, last_active = CURRENT_TIMESTAMP
+        WHERE id = ?
+    ''', (notes, customer_id))
+    
+    conn.commit()
+    conn.close()
+
+def get_customer_notes(customer_id):
+    """Get admin notes for a customer"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT admin_notes FROM customers WHERE id = ?', (customer_id,))
+    result = cursor.fetchone()
+    conn.close()
+    
+    return result[0] if result and result[0] else ""
+
+def delete_customer(customer_id):
+    """Delete a customer and all associated data"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        # Delete associated chat messages
+        cursor.execute('DELETE FROM chat_messages WHERE customer_id = ?', (customer_id,))
+        
+        # Delete associated chat sessions
+        cursor.execute('DELETE FROM chat_sessions WHERE customer_id = ?', (customer_id,))
+        
+        # Delete the customer
+        cursor.execute('DELETE FROM customers WHERE id = ?', (customer_id,))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        print(f"Error deleting customer: {e}")
+        return False
+    finally:
+        conn.close()
 
 # Initialize database when module is imported
 if __name__ == '__main__':
