@@ -347,6 +347,116 @@ def delete_customer(customer_id):
     finally:
         conn.close()
 
+def get_customer_chat_messages(customer_id):
+    """Get all chat messages for a specific customer"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT id, customer_id, session_id, message_text, sender, timestamp
+        FROM chat_messages
+        WHERE customer_id = ?
+        ORDER BY timestamp ASC
+    ''', (customer_id,))
+    
+    messages = cursor.fetchall()
+    conn.close()
+    
+    # Convert to list of dictionaries
+    message_list = []
+    for msg in messages:
+        message_list.append({
+            'id': msg[0],
+            'customer_id': msg[1],
+            'session_id': msg[2],
+            'text': msg[3],
+            'sender': msg[4],
+            'timestamp': msg[5]
+        })
+    
+    return message_list
+
+def get_latest_session(customer_id):
+    """Get the latest active session for a customer, or create one if none exists"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Get the latest session that hasn't ended
+    cursor.execute('''
+        SELECT id FROM chat_sessions 
+        WHERE customer_id = ? AND session_end IS NULL
+        ORDER BY session_start DESC
+        LIMIT 1
+    ''', (customer_id,))
+    
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result:
+        session_id = result[0]
+    else:
+        # Create a new session if none exists
+        session_id = start_chat_session(customer_id)
+    
+    return session_id
+
+def get_agent_queue():
+    """Get customers waiting for agent support (new or in_progress status)"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Get customers who are new or in_progress (not closed)
+    cursor.execute('''
+        SELECT id, name, contact, source, ip_address, device_type, 
+               time_spent_seconds, created_at, last_active, status, admin_notes
+        FROM customers
+        WHERE status != 'closed'
+        ORDER BY created_at DESC
+    ''')
+    
+    customers = cursor.fetchall()
+    
+    # Convert to list of dictionaries with priority scores
+    queue_list = []
+    for customer in customers:
+        customer_dict = {
+            'id': customer[0],
+            'name': customer[1],
+            'contact': customer[2],
+            'source': customer[3],
+            'ip_address': customer[4],
+            'device_type': customer[5],
+            'time_spent_seconds': customer[6],
+            'created_at': customer[7],
+            'last_active': customer[8],
+            'status': customer[9] if len(customer) > 9 else 'new',
+            'admin_notes': customer[10] if len(customer) > 10 else ''
+        }
+        
+        # Calculate priority score
+        priority_score = calculate_priority_score(
+            customer_dict['time_spent_seconds'],
+            customer_dict['source']
+        )
+        customer_dict['priority_score'] = priority_score
+        
+        # Check if customer has requested agent (has chat sessions with agent_requested)
+        cursor.execute('''
+            SELECT COUNT(*) FROM chat_sessions 
+            WHERE customer_id = ? AND agent_requested = 1
+        ''', (customer_dict['id'],))
+        has_requested_agent = cursor.fetchone()[0] > 0
+        customer_dict['agent_requested'] = has_requested_agent
+        
+        queue_list.append(customer_dict)
+    
+    # Sort by: agent_requested first, then priority score
+    queue_list.sort(key=lambda x: (not x.get('agent_requested', False), -x['priority_score']))
+    
+    conn.close()
+    
+    return queue_list
+
 # Initialize database when module is imported
 if __name__ == '__main__':
     init_database()

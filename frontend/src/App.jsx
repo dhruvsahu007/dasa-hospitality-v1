@@ -343,8 +343,7 @@ function App() {
         setSharedMessages(updatedShared)
         localStorage.setItem('customerMessages', JSON.stringify(updatedShared))
         
-        // Also add to main messages
-        setMessages(prev => [...prev, userMessage])
+        // Message already added to main messages at line 301
         return
       }
       

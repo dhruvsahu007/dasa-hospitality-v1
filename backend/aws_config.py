@@ -3,27 +3,50 @@ import boto3
 from botocore.exceptions import ClientError
 from typing import Dict, Any, Optional
 import json
+from dotenv import load_dotenv
+from pathlib import Path
+
+# Load environment variables from .env file
+# Get the directory where this file is located (backend directory)
+backend_dir = Path(__file__).parent
+env_path = backend_dir / '.env'
+# Load .env from backend directory (python-dotenv accepts Path objects)
+load_dotenv(env_path)
 
 class AWSBedrockService:
     def __init__(self):
         """Initialize AWS Bedrock service with credentials"""
-        self.region = "us-east-1"
-        self.knowledge_base_id = "MBFKZIGLKC"
+        self.region = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
+        self.knowledge_base_id = os.getenv('KNOWLEDGE_BASE_ID', 'MBFKZIGLKC')
+        
+        # Get AWS credentials from environment
+        aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
+        aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+        
+        # Check if credentials are available
+        if not aws_access_key_id or not aws_secret_access_key:
+            print("Warning: AWS credentials not found in environment variables")
+            print("Please ensure AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are set in .env file")
+        
+        # Initialize Bedrock client with credentials if provided, otherwise use default boto3 credential chain
+        client_kwargs = {
+            'region_name': self.region
+        }
+        
+        if aws_access_key_id and aws_secret_access_key:
+            client_kwargs['aws_access_key_id'] = aws_access_key_id
+            client_kwargs['aws_secret_access_key'] = aws_secret_access_key
         
         # Initialize Bedrock client
         self.bedrock_agent_runtime = boto3.client(
             'bedrock-agent-runtime',
-            region_name=self.region,
-            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+            **client_kwargs
         )
         
         # Initialize Bedrock client for text generation
         self.bedrock = boto3.client(
             'bedrock-runtime',
-            region_name=self.region,
-            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY')
+            **client_kwargs
         )
 
     async def query_knowledge_base(self, query: str) -> Dict[str, Any]:

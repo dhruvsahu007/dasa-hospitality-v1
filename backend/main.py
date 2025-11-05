@@ -17,7 +17,10 @@ from database import (
     update_customer_notes,
     get_customer_notes,
     get_priority_queue,
-    delete_customer
+    delete_customer,
+    get_customer_chat_messages,
+    get_agent_queue,
+    get_latest_session
 )
 
 # Initialize database on startup
@@ -315,6 +318,50 @@ async def delete_lead(customer_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete customer: {str(e)}")
+
+@app.get("/api/agent/queue")
+async def get_agent_queue_endpoint():
+    """Get queue of customers waiting for agent support"""
+    try:
+        queue = get_agent_queue()
+        return {
+            "success": True,
+            "count": len(queue),
+            "queue": queue
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve agent queue: {str(e)}")
+
+@app.get("/api/customers/{customer_id}/messages")
+async def get_customer_messages(customer_id: int):
+    """Get all chat messages for a specific customer"""
+    try:
+        messages = get_customer_chat_messages(customer_id)
+        return {
+            "success": True,
+            "count": len(messages),
+            "messages": messages
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve messages: {str(e)}")
+
+@app.post("/api/agent/send-message")
+async def send_agent_message(customer_id: int, message: str):
+    """Send a message from agent to customer (handles session automatically)"""
+    try:
+        # Get or create session
+        session_id = get_latest_session(customer_id)
+        
+        # Save message
+        save_chat_message(customer_id, session_id, message, 'agent')
+        
+        return {
+            "success": True,
+            "message": "Message sent successfully",
+            "session_id": session_id
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8001)
