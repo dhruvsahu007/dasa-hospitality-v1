@@ -10,7 +10,7 @@ from pathlib import Path
 # Get the directory where this file is located (backend directory)
 backend_dir = Path(__file__).parent
 env_path = backend_dir / '.env'
-# Load .env from backend directory (python-dotenv accepts Path objects)
+# Load .env from backend directory (python-dotenv accepts Path objects)()
 load_dotenv(env_path)
 
 class AWSBedrockService:
