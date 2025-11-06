@@ -37,9 +37,23 @@ def init_database():
             session_end TIMESTAMP,
             total_messages INTEGER DEFAULT 0,
             agent_requested BOOLEAN DEFAULT 0,
+            agent_requested_at TIMESTAMP,
             FOREIGN KEY (customer_id) REFERENCES customers (id)
         )
     ''')
+    
+    # Add agent_requested_at column if it doesn't exist (for existing databases)
+    try:
+        cursor.execute("PRAGMA table_info(chat_sessions)")
+        columns = [column[1] for column in cursor.fetchall()]
+        if 'agent_requested_at' not in columns:
+            cursor.execute('''
+                ALTER TABLE chat_sessions 
+                ADD COLUMN agent_requested_at TIMESTAMP
+            ''')
+            print("Added agent_requested_at column to chat_sessions")
+    except Exception as e:
+        print(f"Note: Could not add agent_requested_at column (may already exist): {e}")
     
     # Create chat_messages table
     cursor.execute('''
@@ -401,30 +415,33 @@ def get_latest_session(customer_id):
     return session_id
 
 def mark_agent_requested(customer_id, session_id=None):
-    """Mark that a customer has requested an agent"""
+    """Mark that a customer has requested an agent with current timestamp"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     try:
+        # Get current timestamp
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
         # If no session_id provided, get the latest session
         if not session_id:
             session_id = get_latest_session(customer_id)
         
-        # Update the session to mark agent as requested
+        # Update the session to mark agent as requested with timestamp
         cursor.execute('''
             UPDATE chat_sessions 
-            SET agent_requested = 1
+            SET agent_requested = 1, agent_requested_at = ?
             WHERE id = ? AND customer_id = ?
-        ''', (session_id, customer_id))
+        ''', (current_time, session_id, customer_id))
         
         rows_updated = cursor.rowcount
         
-        # If no rows were updated, create a new session with agent_requested = 1
+        # If no rows were updated, create a new session with agent_requested = 1 and timestamp
         if rows_updated == 0:
             cursor.execute('''
-                INSERT INTO chat_sessions (customer_id, agent_requested)
-                VALUES (?, 1)
-            ''', (customer_id,))
+                INSERT INTO chat_sessions (customer_id, agent_requested, agent_requested_at)
+                VALUES (?, 1, ?)
+            ''', (customer_id, current_time))
             session_id = cursor.lastrowid
         
         conn.commit()
@@ -450,28 +467,32 @@ def mark_agent_requested(customer_id, session_id=None):
         conn.close()
 
 def get_agent_queue():
-    """Get customers who are actively chatting and have requested an agent"""
+    """Get customers who have JUST requested to connect to an agent (within the last hour)"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     # Get ONLY customers who:
-    # 1. Have requested an agent (agent_requested = 1)
+    # 1. Have requested an agent (agent_requested = 1) WITHIN THE LAST HOUR
     # 2. Have an active session (session_end IS NULL) - meaning they're currently chatting
     # 3. Have at least one chat message (they've actually chatted)
     # 4. Have status 'new' or 'in_progress' (not 'contacted' or 'closed')
+    # 5. The agent_requested_at timestamp is within the last hour (recent requests only)
     cursor.execute('''
         SELECT DISTINCT c.id, c.name, c.contact, c.source, c.ip_address, c.device_type, 
-               c.time_spent_seconds, c.created_at, c.last_active, c.status, c.admin_notes
+               c.time_spent_seconds, c.created_at, c.last_active, c.status, c.admin_notes,
+               cs.agent_requested_at
         FROM customers c
         INNER JOIN chat_sessions cs ON c.id = cs.customer_id
         WHERE c.status IN ('new', 'in_progress')
           AND cs.agent_requested = 1
           AND cs.session_end IS NULL
+          AND cs.agent_requested_at IS NOT NULL
+          AND datetime(cs.agent_requested_at) >= datetime('now', '-1 hour')
           AND EXISTS (
             SELECT 1 FROM chat_messages cm 
             WHERE cm.customer_id = c.id
           )
-        ORDER BY cs.session_start DESC
+        ORDER BY cs.agent_requested_at DESC
     ''')
     
     customers = cursor.fetchall()

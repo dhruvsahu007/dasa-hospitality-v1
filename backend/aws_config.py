@@ -85,32 +85,53 @@ class AWSBedrockService:
         Generate a response using Claude 3 Haiku model
         """
         try:
-            # Prepare the prompt with context
-            if context:
-                prompt = f"""You are a chatbot for DASA Hospitality.
-
-Context: {context}
-
-User: {query}
-
-STRICT RULE: Answer in EXACTLY 2-3 SHORT sentences (30-50 words TOTAL). Be direct. No lists, no details, no extra info. Just answer the question briefly."""
-            else:
-                prompt = f"""You are a chatbot for DASA Hospitality, a hotel revenue management company.
-
-User: {query}
-
-STRICT RULE: Answer in EXACTLY 2-3 SHORT sentences (30-50 words TOTAL). Be direct. No lists, no extra explanations."""
-            
             # Use Claude 3 Haiku model
             model_id = "anthropic.claude-3-haiku-20240307-v1:0"
+            
+            # System message defining the AI agent's role - STRICT AND EXPLICIT
+            system_message = """You are the DASA Hospitality AI agent - a general AI assistant for DASA Hospitality.
+
+CRITICAL IDENTITY RULES (NEVER VIOLATE):
+- You are a GENERAL AI AGENT for DASA Hospitality
+- You are NOT a social media manager
+- You are NOT a social media specialist
+- You NEVER mention "social media management" or "social media services"
+- You NEVER say you help with "social media needs" or "online presence"
+- You are a general AI assistant that helps with DASA Hospitality services, properties, bookings, and general inquiries
+- When greeting, say: "Hello! I'm DASA Hospitality AI agent. How can I help you with DASA Hospitality today?"
+- If context mentions social media, IGNORE IT COMPLETELY - do not mention it in your response
+- Focus only on DASA Hospitality services, properties, hotels, bookings, and general hospitality topics"""
+            
+            # Prepare user prompt with context - add explicit filtering instructions
+            if context:
+                # Filter out social media mentions from context if present
+                filtered_context = context
+                # Add explicit instruction to ignore social media content
+                user_prompt = f"""IMPORTANT: Ignore any mentions of "social media", "social media management", or "social media services" in the context below. Do NOT reference social media in your response.
+
+Context: {filtered_context}
+
+User: {query}
+
+STRICT RULES:
+- Answer in EXACTLY 2-3 SHORT sentences (30-50 words TOTAL)
+- Be direct. No lists, no details, no extra info
+- NEVER mention social media, social media management, or social media services
+- If context talks about social media, ignore it completely
+- Just answer the question briefly about DASA Hospitality general services"""
+            else:
+                user_prompt = f"""User: {query}
+
+STRICT RULE: Answer in EXACTLY 2-3 SHORT sentences (30-50 words TOTAL). Be direct. No lists, no extra explanations. NEVER mention social media."""
             
             body = {
                 "anthropic_version": "bedrock-2023-05-31",
                 "max_tokens": 100,
+                "system": system_message,
                 "messages": [
                     {
                         "role": "user",
-                        "content": prompt
+                        "content": user_prompt
                     }
                 ]
             }
@@ -146,14 +167,24 @@ STRICT RULE: Answer in EXACTLY 2-3 SHORT sentences (30-50 words TOTAL). Be direc
             # Step 1: Query knowledge base
             kb_response = await self.query_knowledge_base(query)
             
-            # Step 2: Extract context from knowledge base results
+            # Step 2: Extract context from knowledge base results - FILTER OUT SOCIAL MEDIA CONTENT
             context = ""
             if kb_response["success"] and kb_response["retrieval_results"]:
                 context_parts = []
+                social_media_keywords = ['social media', 'social media management', 'social media services', 
+                                       'online presence', 'social media strategy', 'social media marketing']
+                
                 for result in kb_response["retrieval_results"][:3]:  # Use top 3 results
                     content = result.get('content', {}).get('text', '')
                     if content:
-                        context_parts.append(content)
+                        # Filter out content that is primarily about social media
+                        content_lower = content.lower()
+                        is_social_media_content = any(keyword in content_lower for keyword in social_media_keywords)
+                        
+                        # Only include content if it's not primarily about social media
+                        if not is_social_media_content:
+                            context_parts.append(content)
+                
                 context = "\n\n".join(context_parts)
             
             # Step 3: Generate response with context
