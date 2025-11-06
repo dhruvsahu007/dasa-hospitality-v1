@@ -182,6 +182,7 @@ function App() {
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
   const fileInputRef = useRef(null)
+  const processedAgentMessageIdsRef = useRef(new Set())
 
   // Detect device info
   const getDeviceInfo = () => {
@@ -253,6 +254,42 @@ function App() {
     return () => clearInterval(interval)
   }, [isAgentMode, messages])
 
+  // Poll backend for agent messages when in agent mode and reflect them in customer chat
+  useEffect(() => {
+    if (!isAgentMode || !customerId) return
+
+    const pollAgentMessages = async () => {
+      try {
+        const resp = await axios.get(`${API_BASE_URL}/api/customers/${customerId}/messages`)
+        if (resp.data?.success && Array.isArray(resp.data.messages)) {
+          const agentMsgs = resp.data.messages.filter(m => m.sender === 'agent')
+          const newCustomerViewMessages = []
+          agentMsgs.forEach(m => {
+            if (!processedAgentMessageIdsRef.current.has(m.id)) {
+              processedAgentMessageIdsRef.current.add(m.id)
+              newCustomerViewMessages.push({
+                id: `agent-${m.id}`,
+                text: m.text,
+                sender: 'bot',
+                timestamp: new Date(m.timestamp).toLocaleTimeString()
+              })
+            }
+          })
+          if (newCustomerViewMessages.length > 0) {
+            setMessages(prev => [...prev, ...newCustomerViewMessages])
+          }
+        }
+      } catch (e) {
+        // silent fail to avoid UX noise
+      }
+    }
+
+    // Initial fetch
+    pollAgentMessages()
+    const interval = setInterval(pollAgentMessages, 2000)
+    return () => clearInterval(interval)
+  }, [isAgentMode, customerId])
+
   // Auto-focus input when chat opens or after bot responds
   useEffect(() => {
     if (isChatOpen && !isLoading) {
@@ -309,6 +346,44 @@ function App() {
       if (requestsAgent && !agentRequested) {
         setAgentRequested(true)
         setIsAgentMode(true) // Switch to agent mode
+        
+        // Ensure customer info is saved first if not already saved
+        if (!customerId || !sessionId) {
+          if (customerInfo.completed) {
+            await saveCustomerToBackend(customerInfo)
+            // Wait a bit for the save to complete
+            await new Promise(resolve => setTimeout(resolve, 500))
+          }
+        }
+        
+        // Mark agent as requested in the backend
+        if (customerId && sessionId) {
+          try {
+            const response = await axios.post(`${API_BASE_URL}/api/customer/request-agent`, null, {
+              params: {
+                customer_id: customerId,
+                session_id: sessionId
+              }
+            })
+            console.log('✅ Agent request marked:', response.data)
+          } catch (error) {
+            console.error('❌ Failed to mark agent request:', error)
+            // Try again with just customer_id (let backend find session)
+            if (customerId) {
+              try {
+                await axios.post(`${API_BASE_URL}/api/customer/request-agent`, null, {
+                  params: {
+                    customer_id: customerId
+                  }
+                })
+              } catch (retryError) {
+                console.error('❌ Retry failed:', retryError)
+              }
+            }
+          }
+        } else {
+          console.warn('⚠️ Cannot mark agent request: customerId or sessionId missing', { customerId, sessionId })
+        }
         
         const agentNotification = {
           id: messages.length + 2,

@@ -20,7 +20,8 @@ from database import (
     delete_customer,
     get_customer_chat_messages,
     get_agent_queue,
-    get_latest_session
+    get_latest_session,
+    mark_agent_requested
 )
 
 # Initialize database on startup
@@ -362,6 +363,23 @@ async def send_agent_message(customer_id: int, message: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to send message: {str(e)}")
+
+@app.post("/api/customer/request-agent")
+async def request_agent(customer_id: int, session_id: Optional[int] = None):
+    """Mark that a customer has requested an agent"""
+    try:
+        result = mark_agent_requested(customer_id, session_id)
+        if result:
+            return {
+                "success": True,
+                "message": "Agent request marked successfully",
+                "customer_id": customer_id,
+                "session_id": session_id
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Failed to mark agent request")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to mark agent request: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8001)

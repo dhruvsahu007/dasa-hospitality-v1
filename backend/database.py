@@ -400,18 +400,78 @@ def get_latest_session(customer_id):
     
     return session_id
 
-def get_agent_queue():
-    """Get customers waiting for agent support (new or in_progress status)"""
+def mark_agent_requested(customer_id, session_id=None):
+    """Mark that a customer has requested an agent"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Get customers who are new or in_progress (not closed)
+    try:
+        # If no session_id provided, get the latest session
+        if not session_id:
+            session_id = get_latest_session(customer_id)
+        
+        # Update the session to mark agent as requested
+        cursor.execute('''
+            UPDATE chat_sessions 
+            SET agent_requested = 1
+            WHERE id = ? AND customer_id = ?
+        ''', (session_id, customer_id))
+        
+        rows_updated = cursor.rowcount
+        
+        # If no rows were updated, create a new session with agent_requested = 1
+        if rows_updated == 0:
+            cursor.execute('''
+                INSERT INTO chat_sessions (customer_id, agent_requested)
+                VALUES (?, 1)
+            ''', (customer_id,))
+            session_id = cursor.lastrowid
+        
+        conn.commit()
+        
+        # Verify the update
+        cursor.execute('''
+            SELECT agent_requested FROM chat_sessions 
+            WHERE id = ? AND customer_id = ?
+        ''', (session_id, customer_id))
+        result = cursor.fetchone()
+        
+        if result and result[0] == 1:
+            return True
+        else:
+            print(f"Warning: agent_requested not set for customer {customer_id}, session {session_id}")
+            return False
+            
+    except Exception as e:
+        print(f"Error marking agent requested: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+def get_agent_queue():
+    """Get customers who are actively chatting and have requested an agent"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Get ONLY customers who:
+    # 1. Have requested an agent (agent_requested = 1)
+    # 2. Have an active session (session_end IS NULL) - meaning they're currently chatting
+    # 3. Have at least one chat message (they've actually chatted)
+    # 4. Have status 'new' or 'in_progress' (not 'contacted' or 'closed')
     cursor.execute('''
-        SELECT id, name, contact, source, ip_address, device_type, 
-               time_spent_seconds, created_at, last_active, status, admin_notes
-        FROM customers
-        WHERE status != 'closed'
-        ORDER BY created_at DESC
+        SELECT DISTINCT c.id, c.name, c.contact, c.source, c.ip_address, c.device_type, 
+               c.time_spent_seconds, c.created_at, c.last_active, c.status, c.admin_notes
+        FROM customers c
+        INNER JOIN chat_sessions cs ON c.id = cs.customer_id
+        WHERE c.status IN ('new', 'in_progress')
+          AND cs.agent_requested = 1
+          AND cs.session_end IS NULL
+          AND EXISTS (
+            SELECT 1 FROM chat_messages cm 
+            WHERE cm.customer_id = c.id
+          )
+        ORDER BY cs.session_start DESC
     ''')
     
     customers = cursor.fetchall()
@@ -440,18 +500,15 @@ def get_agent_queue():
         )
         customer_dict['priority_score'] = priority_score
         
-        # Check if customer has requested agent (has chat sessions with agent_requested)
-        cursor.execute('''
-            SELECT COUNT(*) FROM chat_sessions 
-            WHERE customer_id = ? AND agent_requested = 1
-        ''', (customer_dict['id'],))
-        has_requested_agent = cursor.fetchone()[0] > 0
-        customer_dict['agent_requested'] = has_requested_agent
+        # All customers in queue have already requested agent (filtered by query)
+        customer_dict['agent_requested'] = True
         
         queue_list.append(customer_dict)
     
-    # Sort by: agent_requested first, then priority score
-    queue_list.sort(key=lambda x: (not x.get('agent_requested', False), -x['priority_score']))
+    # Sort by: priority score (highest first), then by creation time (newest first)
+    queue_list.sort(key=lambda x: (
+        -x['priority_score'],  # Higher priority score first
+    ))
     
     conn.close()
     
