@@ -4,54 +4,53 @@ import './Agent.css'
 
 const API_BASE_URL = 'http://localhost:8001'
 
-// Memoized queue item component for better performance
-const QueueItem = React.memo(({ customer, isSelected, onSelect, getPriorityBadge, getStatusBadge }) => {
-  const priorityInfo = getPriorityBadge(customer.priority_score || 0)
-  const statusInfo = getStatusBadge(customer.status)
+// Memoized Queue Item Component
+const QueueItem = React.memo(({ customer, isSelected, onClick, priorityScore, status }) => {
+  const getPriorityColor = (score) => {
+    if (score >= 60) return '#ef4444'
+    if (score >= 40) return '#f97316'
+    if (score >= 20) return '#eab308'
+    return '#22c55e'
+  }
+
+  const getStatusColor = (status) => {
+    const colors = {
+      'new': '#3b82f6',
+      'in_progress': '#f59e0b',
+      'contacted': '#8b5cf6',
+      'closed': '#10b981'
+    }
+    return colors[status] || '#6b7280'
+  }
 
   return (
     <div
       className={`queue-item ${isSelected ? 'selected' : ''}`}
-      onClick={() => onSelect(customer)}
+      onClick={onClick}
     >
-      <div className="queue-item-header">
+      <div className="queue-item-top">
         <div className="queue-item-name">{customer.name}</div>
+        <div className="priority-indicator" style={{ backgroundColor: getPriorityColor(priorityScore) }} />
       </div>
-      <div className="queue-item-details">
-        <span className="queue-item-contact">{customer.contact}</span>
+      <div className="queue-item-contact">{customer.contact}</div>
+      <div className="queue-item-meta">
         <span className="queue-item-source">{customer.source}</span>
-      </div>
-      <div className="queue-item-footer">
-        <span className="queue-item-priority" style={{
-          backgroundColor: priorityInfo.bgColor,
-          color: priorityInfo.color
-        }}>
-          {priorityInfo.level}
-        </span>
-        <span className="queue-item-status" style={{
-          backgroundColor: statusInfo.bgColor,
-          color: statusInfo.color
-        }}>
-          {statusInfo.label}
+        <span className="queue-item-status" style={{ color: getStatusColor(status) }}>
+          {status === 'in_progress' ? 'In Progress' : status === 'new' ? 'New' : status}
         </span>
       </div>
     </div>
   )
 })
 
-// Memoized message component
-const MessageItem = React.memo(({ message }) => {
+// Memoized Message Component
+const MessageBubble = React.memo(({ message }) => {
+  const isAgent = message.sender === 'agent'
+  
   return (
-    <div className={`agent-message ${message.sender}`}>
-      <div className="agent-message-content">
-        <div className="agent-message-header">
-          <span className="agent-message-sender">
-            {message.sender === 'customer' || message.sender === 'user' ? '👤 Customer' : '👨‍💼 You'}
-          </span>
-          <span className="agent-message-time">{message.timestamp}</span>
-        </div>
-        <div className="agent-message-text">{message.text}</div>
-      </div>
+    <div className={`message-bubble ${isAgent ? 'agent' : 'customer'}`}>
+      <div className="message-text">{message.text}</div>
+      <div className="message-time">{message.timestamp}</div>
     </div>
   )
 })
@@ -60,69 +59,44 @@ function Agent() {
   const [queue, setQueue] = useState([])
   const [selectedCustomer, setSelectedCustomer] = useState(null)
   const [messages, setMessages] = useState([])
-  const [agentInputMessage, setAgentInputMessage] = useState('')
+  const [inputMessage, setInputMessage] = useState('')
   const [isSending, setIsSending] = useState(false)
-  const [isLoadingQueue, setIsLoadingQueue] = useState(false)
-  const agentMessagesEndRef = useRef(null)
-  const agentInputRef = useRef(null)
-  const lastMessageCountRef = useRef(0)
+  const [isLoading, setIsLoading] = useState(false)
+  const messagesEndRef = useRef(null)
+  const inputRef = useRef(null)
+  const lastMessageIdRef = useRef(0)
 
-  // Memoized functions
-  const getPriorityBadge = useCallback((score) => {
-    if (score >= 60) return { level: 'CRITICAL', color: '#dc2626', bgColor: '#fee2e2' }
-    if (score >= 40) return { level: 'HIGH', color: '#ea580c', bgColor: '#ffedd5' }
-    if (score >= 20) return { level: 'MEDIUM', color: '#f59e0b', bgColor: '#fef3c7' }
-    return { level: 'LOW', color: '#10b981', bgColor: '#d1fae5' }
-  }, [])
-
-  const getStatusBadge = useCallback((status) => {
-    const statusMap = {
-      'new': { label: 'New', color: '#3b82f6', bgColor: '#dbeafe' },
-      'contacted': { label: 'Contacted', color: '#8b5cf6', bgColor: '#ede9fe' },
-      'in_progress': { label: 'In Progress', color: '#f59e0b', bgColor: '#fef3c7' },
-      'closed': { label: 'Closed', color: '#10b981', bgColor: '#d1fae5' }
-    }
-    return statusMap[status] || statusMap['new']
-  }, [])
-
-  // Optimized queue fetching with loading state
+  // Fetch queue
   const fetchQueue = useCallback(async () => {
     try {
-      setIsLoadingQueue(true)
       const response = await axios.get(`${API_BASE_URL}/api/agent/queue`)
       if (response.data.success) {
         setQueue(response.data.queue || [])
       }
     } catch (error) {
       console.error('Failed to fetch queue:', error)
-    } finally {
-      setIsLoadingQueue(false)
     }
   }, [])
 
-  // Fetch queue periodically - reduced frequency
-  useEffect(() => {
-    fetchQueue()
-    const interval = setInterval(fetchQueue, 8000) // Reduced to 8 seconds
-    return () => clearInterval(interval)
-  }, [fetchQueue])
-
-  // Fetch messages when customer is selected
-  const fetchCustomerMessages = useCallback(async (customerId) => {
+  // Fetch messages for selected customer
+  const fetchMessages = useCallback(async (customerId) => {
+    if (!customerId) return
+    
     try {
       const response = await axios.get(`${API_BASE_URL}/api/customers/${customerId}/messages`)
       if (response.data.success) {
-        const formattedMessages = response.data.messages.map(msg => ({
+        const formatted = response.data.messages.map(msg => ({
           id: msg.id,
           text: msg.text,
           sender: msg.sender === 'user' ? 'customer' : msg.sender,
-          timestamp: new Date(msg.timestamp).toLocaleTimeString()
+          timestamp: new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }))
         
-        // Only update if messages actually changed
-        if (formattedMessages.length !== lastMessageCountRef.current) {
-          setMessages(formattedMessages)
-          lastMessageCountRef.current = formattedMessages.length
+        // Only update if there are new messages
+        const lastId = formatted.length > 0 ? formatted[formatted.length - 1].id : 0
+        if (lastId !== lastMessageIdRef.current) {
+          setMessages(formatted)
+          lastMessageIdRef.current = lastId
         }
       }
     } catch (error) {
@@ -130,268 +104,238 @@ function Agent() {
     }
   }, [])
 
-  useEffect(() => {
-    if (selectedCustomer) {
-      fetchCustomerMessages(selectedCustomer.id)
-      lastMessageCountRef.current = 0
-      if (selectedCustomer.status === 'new') {
-        updateCustomerStatus(selectedCustomer.id, 'in_progress')
-      }
-    } else {
-      setMessages([])
-      lastMessageCountRef.current = 0
-    }
-  }, [selectedCustomer, fetchCustomerMessages])
-
-  // Poll for new messages - reduced frequency and smarter polling
-  useEffect(() => {
-    if (!selectedCustomer) return
-
-    const interval = setInterval(() => {
-      fetchCustomerMessages(selectedCustomer.id)
-    }, 5000) // Increased to 5 seconds
-
-    return () => clearInterval(interval)
-  }, [selectedCustomer, fetchCustomerMessages])
-
-  const updateCustomerStatus = useCallback(async (customerId, status) => {
+  // Update customer status
+  const updateStatus = useCallback(async (customerId, status) => {
     try {
       await axios.put(`${API_BASE_URL}/api/customers/${customerId}/status`, null, {
         params: { status }
       })
-      fetchQueue() // Refresh queue
+      fetchQueue()
+      if (selectedCustomer?.id === customerId) {
+        setSelectedCustomer(prev => ({ ...prev, status }))
+      }
     } catch (error) {
       console.error('Failed to update status:', error)
     }
-  }, [fetchQueue])
+  }, [fetchQueue, selectedCustomer])
 
+  // Select customer
   const handleSelectCustomer = useCallback((customer) => {
     setSelectedCustomer(customer)
-    setAgentInputMessage('')
-  }, [])
+    setInputMessage('')
+    setMessages([])
+    lastMessageIdRef.current = 0
+    
+    // Mark as in_progress if new
+    if (customer.status === 'new') {
+      updateStatus(customer.id, 'in_progress')
+    }
+  }, [updateStatus])
 
-  const handleAgentSendMessage = useCallback(async (e) => {
+  // Send message
+  const handleSend = useCallback(async (e) => {
     e.preventDefault()
-    if (!agentInputMessage.trim() || !selectedCustomer || isSending) return
+    if (!inputMessage.trim() || !selectedCustomer || isSending) return
 
     setIsSending(true)
-    const messageText = agentInputMessage.trim()
+    const text = inputMessage.trim()
 
     try {
       await axios.post(`${API_BASE_URL}/api/agent/send-message`, null, {
         params: {
           customer_id: selectedCustomer.id,
-          message: messageText
+          message: text
         }
       })
 
-      // Add message optimistically
-      const agentMessage = {
+      // Add optimistically
+      const newMessage = {
         id: Date.now(),
-        text: messageText,
+        text,
         sender: 'agent',
-        timestamp: new Date().toLocaleTimeString()
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }
-      setMessages(prev => [...prev, agentMessage])
-      setAgentInputMessage('')
+      setMessages(prev => [...prev, newMessage])
+      setInputMessage('')
       
-      // Refresh after a delay
-      setTimeout(() => {
-        fetchCustomerMessages(selectedCustomer.id)
-      }, 300)
+      // Refresh after delay
+      setTimeout(() => fetchMessages(selectedCustomer.id), 500)
     } catch (error) {
-      console.error('Failed to send message:', error)
-      alert('Failed to send message. Please try again.')
+      console.error('Failed to send:', error)
+      alert('Failed to send message')
     } finally {
       setIsSending(false)
     }
-  }, [agentInputMessage, selectedCustomer, isSending, fetchCustomerMessages])
+  }, [inputMessage, selectedCustomer, isSending, fetchMessages])
 
-  // Auto-scroll when messages change
+  // Effects
   useEffect(() => {
-    if (messages.length > 0) {
-      agentMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [messages.length])
+    fetchQueue()
+    const interval = setInterval(fetchQueue, 10000) // 10 seconds
+    return () => clearInterval(interval)
+  }, [fetchQueue])
 
-  // Auto-focus input when customer is selected
   useEffect(() => {
     if (selectedCustomer) {
-      setTimeout(() => {
-        agentInputRef.current?.focus()
-      }, 100)
+      fetchMessages(selectedCustomer.id)
+      const interval = setInterval(() => fetchMessages(selectedCustomer.id), 5000)
+      return () => clearInterval(interval)
+    }
+  }, [selectedCustomer, fetchMessages])
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  useEffect(() => {
+    if (selectedCustomer) {
+      setTimeout(() => inputRef.current?.focus(), 100)
     }
   }, [selectedCustomer])
 
   // Memoized queue items
   const queueItems = useMemo(() => {
-    return queue.map((customer) => (
+    return queue.map(customer => (
       <QueueItem
         key={customer.id}
         customer={customer}
         isSelected={selectedCustomer?.id === customer.id}
-        onSelect={handleSelectCustomer}
-        getPriorityBadge={getPriorityBadge}
-        getStatusBadge={getStatusBadge}
+        onClick={() => handleSelectCustomer(customer)}
+        priorityScore={customer.priority_score || 0}
+        status={customer.status}
       />
     ))
-  }, [queue, selectedCustomer, handleSelectCustomer, getPriorityBadge, getStatusBadge])
+  }, [queue, selectedCustomer, handleSelectCustomer])
 
   // Memoized message items
   const messageItems = useMemo(() => {
-    return messages.map((message) => (
-      <MessageItem key={message.id} message={message} />
+    return messages.map(msg => (
+      <MessageBubble key={msg.id} message={msg} />
     ))
   }, [messages])
 
   return (
-    <div className="agent-app-container">
-      <div className="agent-page-container">
-        {/* Agent Header */}
-        <div className="agent-page-header">
-          <div className="agent-header-content">
-            <div className="agent-header-left">
-              <div className="agent-header-info">
-                <h1>Agent Dashboard</h1>
-                <p>DASA Hospitality</p>
-              </div>
-            </div>
-            <div className="agent-header-right">
-              <span className="connection-status">
-                {queue.length} {queue.length === 1 ? 'Customer' : 'Customers'}
-              </span>
-            </div>
+    <div className="agent-dashboard">
+      {/* Header */}
+      <header className="agent-header">
+        <div className="agent-header-content">
+          <div>
+            <h1>Agent Dashboard</h1>
+            <p>DASA Hospitality</p>
+          </div>
+          <div className="queue-badge">
+            {queue.length} {queue.length === 1 ? 'customer' : 'customers'}
           </div>
         </div>
+      </header>
 
-        {/* Main Content Area */}
-        <div className="agent-main-content">
-          {/* Queue Sidebar */}
-          <div className="agent-queue-sidebar">
-            <div className="queue-header">
-              <h2>Active Queue</h2>
-              <span className="queue-count">{queue.length}</span>
-            </div>
-            <div className="queue-list">
-              {isLoadingQueue ? (
-                <div className="queue-empty">
-                  <div className="empty-icon">⏳</div>
-                  <p>Loading...</p>
-                </div>
-              ) : queue.length === 0 ? (
-                <div className="queue-empty">
-                  <div className="empty-icon">📭</div>
-                  <p>No customers waiting</p>
-                  <span>Customers who request an agent will appear here</span>
-                </div>
-              ) : (
-                queueItems
-              )}
-            </div>
+      {/* Main Layout */}
+      <div className="agent-layout">
+        {/* Queue Sidebar */}
+        <aside className="queue-sidebar">
+          <div className="queue-header">
+            <h2>Active Queue</h2>
+            <span className="queue-count-badge">{queue.length}</span>
           </div>
-
-          {/* Chat Area */}
-          <div className="agent-chat-area">
-            {selectedCustomer ? (
-              <>
-                {/* Customer Info Bar */}
-                <div className="customer-info-bar">
-                  <div className="customer-info-main">
-                    <div className="customer-info-left">
-                      <span className="customer-avatar">👤</span>
-                      <div>
-                        <h3>{selectedCustomer.name}</h3>
-                        <p>{selectedCustomer.contact} • {selectedCustomer.source}</p>
-                      </div>
-                    </div>
-                    <div className="customer-info-right">
-                      <button
-                        className="status-button"
-                        onClick={() => {
-                          const newStatus = selectedCustomer.status === 'in_progress' ? 'contacted' : 'in_progress'
-                          updateCustomerStatus(selectedCustomer.id, newStatus)
-                        }}
-                      >
-                        {selectedCustomer.status === 'in_progress' ? 'Mark Contacted' : 'Mark Progress'}
-                      </button>
-                      <button
-                        className="close-button"
-                        onClick={() => {
-                          updateCustomerStatus(selectedCustomer.id, 'closed')
-                          setSelectedCustomer(null)
-                        }}
-                      >
-                        Close
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Chat Messages */}
-                <div className="agent-chat-box">
-                  <div className="agent-chat-messages">
-                    {messages.length === 0 ? (
-                      <div className="agent-waiting-state">
-                        <div className="waiting-icon">💬</div>
-                        <h2>No messages yet</h2>
-                        <p>Start the conversation with {selectedCustomer.name}</p>
-                      </div>
-                    ) : (
-                      messageItems
-                    )}
-                    <div ref={agentMessagesEndRef} />
-                  </div>
-
-                  {/* Chat Input */}
-                  <div className="agent-chat-input-area">
-                    <form className="agent-chat-form" onSubmit={handleAgentSendMessage}>
-                      <div className="agent-input-container">
-                        <textarea
-                          ref={agentInputRef}
-                          value={agentInputMessage}
-                          onChange={(e) => setAgentInputMessage(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              e.preventDefault()
-                              handleAgentSendMessage(e)
-                            }
-                          }}
-                          placeholder="Type your reply..."
-                          className="agent-message-input"
-                          disabled={isSending}
-                          rows="2"
-                        />
-                        <button
-                          type="submit"
-                          className="agent-send-button"
-                          disabled={!agentInputMessage.trim() || isSending}
-                        >
-                          {isSending ? 'Sending...' : 'Send'}
-                        </button>
-                      </div>
-                    </form>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="agent-chat-box empty-chat">
-                <div className="agent-waiting-state">
-                  <div className="waiting-icon">👋</div>
-                  <h2>Select a Customer</h2>
-                  <p>Choose a customer from the queue to start chatting</p>
-                </div>
+          
+          <div className="queue-list">
+            {queue.length === 0 ? (
+              <div className="empty-queue">
+                <div className="empty-icon">💬</div>
+                <p>No active customers</p>
+                <span>Waiting for agent requests...</span>
               </div>
+            ) : (
+              queueItems
             )}
           </div>
-        </div>
+        </aside>
 
-        {/* Agent Footer */}
-        <div className="agent-page-footer">
-          <p>© 2025 DASA Hospitality</p>
-        </div>
+        {/* Chat Area */}
+        <main className="chat-area">
+          {selectedCustomer ? (
+            <>
+              {/* Customer Header */}
+              <div className="chat-header">
+                <div className="customer-header-info">
+                  <div className="customer-avatar-small">{selectedCustomer.name.charAt(0).toUpperCase()}</div>
+                  <div>
+                    <h3>{selectedCustomer.name}</h3>
+                    <p>{selectedCustomer.contact} · {selectedCustomer.source}</p>
+                  </div>
+                </div>
+                <div className="chat-actions">
+                  <button
+                    className="action-btn secondary"
+                    onClick={() => {
+                      const newStatus = selectedCustomer.status === 'in_progress' ? 'contacted' : 'in_progress'
+                      updateStatus(selectedCustomer.id, newStatus)
+                    }}
+                  >
+                    {selectedCustomer.status === 'in_progress' ? 'Mark Contacted' : 'Mark Progress'}
+                  </button>
+                  <button
+                    className="action-btn danger"
+                    onClick={() => {
+                      updateStatus(selectedCustomer.id, 'closed')
+                      setSelectedCustomer(null)
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              {/* Messages */}
+              <div className="messages-container">
+                {messages.length === 0 ? (
+                  <div className="empty-messages">
+                    <div className="empty-icon-large">💬</div>
+                    <p>No messages yet</p>
+                    <span>Start the conversation</span>
+                  </div>
+                ) : (
+                  <div className="messages-list">
+                    {messageItems}
+                    <div ref={messagesEndRef} />
+                  </div>
+                )}
+              </div>
+
+              {/* Input */}
+              <div className="chat-input-container">
+                <form onSubmit={handleSend} className="chat-input-form">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    placeholder="Type a message..."
+                    className="chat-input"
+                    disabled={isSending}
+                  />
+                  <button
+                    type="submit"
+                    className="send-btn"
+                    disabled={!inputMessage.trim() || isSending}
+                  >
+                    {isSending ? 'Sending...' : 'Send'}
+                  </button>
+                </form>
+              </div>
+            </>
+          ) : (
+            <div className="no-selection">
+              <div className="no-selection-icon">👋</div>
+              <h2>Select a Customer</h2>
+              <p>Choose a customer from the queue to start chatting</p>
+            </div>
+          )}
+        </main>
       </div>
     </div>
   )
 }
 
 export default Agent
+
