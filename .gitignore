@@ -100,6 +100,11 @@ customer_data.db
 *.db.backup
 *.sql.backup
 
+# ChromaDB Vector Database
+backend/chroma_db/
+chroma_db/
+*.chroma
+
 # ========================================
 # AWS & Credentials
 # ========================================
@@ -212,6 +217,11 @@ secrets.json
 *.pem
 *.key
 *.cert
+
+# Machine Learning Models Cache
+.cache/
+backend/.cache/
+**/chroma/onnx_models/
 
 # ========================================
 # Build artifacts

@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict
 import uvicorn
-from aws_config import bedrock_service
+# from aws_config import bedrock_service  # Commented out - using OpenAI instead
+from openai_config import openai_service
 from config import validate_config
 from database import (
     init_database, 
@@ -72,7 +73,7 @@ async def get_company_info():
     """Get company information"""
     return {
         "company": "DASA Hospitality",
-        "description": "AI Chatbot Demo Platform with AWS Bedrock",
+        "description": "AI Chatbot Demo Platform with OpenAI",
         "services": [
             "Hotel Revenue Management",
             "Marketing Solutions",
@@ -80,10 +81,10 @@ async def get_company_info():
             "OTA Management"
         ],
         "ai_features": [
-            "AWS Bedrock Integration",
-            "Knowledge Base Search",
-            "Claude 3 Haiku Model",
-            "RAG (Retrieval-Augmented Generation)"
+            "OpenAI GPT Integration",
+            "Natural Language Processing",
+            "GPT-3.5-Turbo Model",
+            "Intelligent Conversation"
         ]
     }
 
@@ -92,17 +93,17 @@ async def get_chatbot_status():
     """Get chatbot status"""
     return {
         "status": "active",
-        "message": "AI Chatbot is active with AWS Bedrock integration",
+        "message": "AI Chatbot is active with OpenAI integration",
         "features": [
             "Guest inquiries handling",
             "Booking assistance", 
             "Revenue optimization",
             "24/7 customer support",
-            "Knowledge base search",
-            "Professional responses"
+            "Intelligent responses",
+            "Professional communication"
         ],
-        "ai_model": "Claude 3 Haiku",
-        "knowledge_base": "dasa-hospitality-v1"
+        "ai_model": "GPT-3.5-Turbo",
+        "powered_by": "OpenAI"
     }
 
 @app.post("/api/chatbot/message", response_model=ChatResponse)
@@ -112,8 +113,8 @@ async def send_chat_message(chat_message: ChatMessage):
         if not chat_message.message.strip():
             raise HTTPException(status_code=400, detail="Message cannot be empty")
         
-        # Get response from AWS Bedrock
-        result = await bedrock_service.get_chatbot_response(chat_message.message)
+        # Get response from OpenAI
+        result = await openai_service.get_chatbot_response(chat_message.message)
         
         if not result["success"]:
             raise HTTPException(status_code=500, detail="Failed to generate response")
@@ -136,7 +137,7 @@ async def test_chatbot():
     """Test the chatbot with a sample message"""
     try:
         test_message = "What services does DASA Hospitality offer?"
-        result = await bedrock_service.get_chatbot_response(test_message)
+        result = await openai_service.get_chatbot_response(test_message)
         
         return {
             "test_message": test_message,
