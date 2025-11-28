@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import './Admin.css'
 
-const API_BASE_URL = 'http://localhost:8001'
+const API_BASE_URL = 'http://localhost:5005'
 
 // Stats Card Component
 function StatsCard({ icon, label, value, badge, color }) {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import axios from 'axios'
 import './Agent.css'
 
-const API_BASE_URL = 'http://localhost:8001'
+const API_BASE_URL = 'http://localhost:5005'
 
 // Memoized Queue Item Component
 const QueueItem = React.memo(({ customer, isSelected, onClick, priorityScore, status }) => {

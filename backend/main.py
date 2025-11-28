@@ -383,4 +383,4 @@ async def request_agent(customer_id: int, session_id: Optional[int] = None):
         raise HTTPException(status_code=500, detail=f"Failed to mark agent request: {str(e)}")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=5005)

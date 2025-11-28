@@ -3,7 +3,7 @@ import axios from 'axios'
 import './App.css'
 
 // API Configuration
-const API_BASE_URL = 'http://localhost:8001'
+const API_BASE_URL = 'http://localhost:5005'
 
 // Inline Text Input Component
 function InlineTextInput({ message, onSubmit, placeholder, type = 'text' }) {
